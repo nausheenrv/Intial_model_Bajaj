@@ -1,0 +1,1 @@
+{"detail":[{"type":"missing","loc":["header","authorization"],"msg":"Field required","input":null},{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}

@@ -1,0 +1,59 @@
+1.Create Virtual Environment (Optional but Recommended):
+
+python -m venv venv
+source venv/bin/activate    # On Windows: venv\Scripts\activate
+
+
+2.Install requirements 
+
+pip install -r requirements.txt
+
+
+3.Install Ollama + Pull Model 
+
+1.Install Ollama from official website (this should be always runing [ollama serve])
+2.Install these two
+a.ollama run mistral
+b.ollama run nomic-embed-text
+
+
+4. Run Your Script
+
+python extract.py "I have a family of 4 and a budget concern. Should I choose Imperial Plan with higher coverage amount or Imperial Plus Plan with lower coverage? What factors should I consider for this decision based on the benefits offered?"
+
+
+You will get output as 
+
+Processing query: If I frequently travel internationally and have elderly parents who might need extended hospital stays, which plan and coverage amount would you recommend? Justify your recommendation with specific benefits from the document.
+Query type: comparison
+HyDE hypothetical answer:
+ Given the frequent international travel and potential need for extended hospital stays for your elderly parents, a comprehensive global health insurance plan would be ideal. A plan like Cigna Global Health Options or Allianz Global Assistance's International Health Plan could be suitable.
+
+1) **Cigna Global Health Options** offers extensive coverage for inpatient and outpatient treatments, including emergency medical evacuation and political evacuation. This is particularly beneficial if your parents require extended hospital stays abroad, as it ensures they receive necessary care while also covering the cost of transportation to a facility equipped to handle their needs.
+
+2) **Allianz Global Assistance's International Health Plan** includes coverage for pre-existing conditions and mental health services, which are crucial for elderly individuals. Additionally, it offers the option to add coverages such as dental care, maternity, and wellness check-ups, providing a more comprehensive solution.
+
+It is essential to note that these recommendations serve as a starting point and may not meet all your specific needs. A thorough review of the plans' details or consulting with an insurance broker would be necessary to ensure optimal coverage for you and your parents.
+
+Response:  Based on the provided context, I would recommend the Imperial Plus Plan for someone who frequently travels internationally and has elderly parents who might require extended hospital stays. Here are some specific benefits of this plan that make it suitable:
+
+1. **Domestic and International Coverage**: The policy covers both domestic and international health care needs, making it ideal for frequent travelers.
+
+2. **Extended Hospital Stays**: In situations where ongoing treatment is necessary, hotel accommodation costs will be covered, which could be beneficial for elderly parents requiring extended hospital stays.
+
+3. **Repatriation**: If adequately screened blood isn't available in the country of treatment, repatriation is arranged, ensuring continued care for the patient.
+5. **Portability**: Insured individuals have the option to port their policy to other insurers, which can be helpful if the policy terms change or if better coverage options become available in the future.
+
+5. **Portability**: Insured individuals have the option to port their policy to other insurers, which can be helpful if the policy terms change or if better coverage options become available in the future.
+
+6. **Discounts**: Employee discounts offer a 20% reduction on published premium rates for employees of Bajaj Allianz & its group companies, and an Online/Direct Business Discount provides a 5% discount for policies underwritten directly through the company. These discounts can help manage costs.
+
+However, it's essential to note that some expenses related to mental illness treatment and diagnostic tests without a psychiatrist's prescription are excluded from the coverage. Therefore, it is crucial to understand the specific terms and conditions of the policy before making a decision.
+Sources: ['pdfs\\BAJHLIP23020V012223.pdf:16:1', 'pdfs\\BAJHLIP23020V012223.pdf:35:1', 'pdfs\\BAJHLIP23020V012223.pdf:30:1', 'pdfs\\BAJHLIP23020V012223.pdf:27:1', 'pdfs\\BAJHLIP23020V012223.pdf:35:0']
+
+
+
+
+Please check this for detailed data flow diagram
+
+https://claude.ai/public/artifacts/5859190e-ecd2-4acd-a088-70d0f4a18746
