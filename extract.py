@@ -24,7 +24,7 @@ CACHE_INFO_FILE = "chroma_cache_info.json"
 PDF_DIRECTORY = "pdfs"
 
 # Set Gemini API key
-genai.configure(api_key="AIzaSyBUkL0iGAl-5wcHIIozLHAIVh65aOeCyrI")  # <-- Replace with your actual key
+genai.configure(api_key="AIzaSyClZpzFX6SGbW3VGHVlMVz46a3nk6kgxDA")  # <-- Replace with your actual key
 
 class RAGSystem:
     def __init__(self, pdf_directory=PDF_DIRECTORY, chroma_path=CHROMA_PATH):
