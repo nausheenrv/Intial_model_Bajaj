@@ -7,6 +7,7 @@ import os
 import tempfile
 import requests
 from pathlib import Path
+from extract import extract_text_from_pdf
 
 app = FastAPI(title="Q.4 Retrieval System API", version="1.0.0")
 
@@ -131,14 +132,15 @@ async def run_submissions(
         
         # Load and process documents
         print("Loading documents...")
-        documents = load_documents()
-        
-        if not documents:
-            # Create a dummy document so the process continues
-            documents = [{
-                "content": "This is a downloaded PDF document with relevant content for your questions.",
-                "source": pdf_filename
-            }]
+        print("Extracting text from PDF...")
+        pdf_path = f"pdfs/{pdf_filename}"
+        pdf_text = extract_text_from_pdf(pdf_path)
+
+        documents = [{
+            "content": pdf_text,
+            "source": pdf_filename
+        }]
+
         
         print(f"Loaded {len(documents)} documents")
         

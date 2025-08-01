@@ -14,7 +14,39 @@ import hashlib
 import json
 import shutil
 import logging
+import requests
+import fitz  # PyMuPDF
+from PyPDF2 import PdfReader
+from io import BytesIO
+from langchain_core.documents import Document
+from langchain.vectorstores import FAISS
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+# Utility: Extract text from a local PDF using PyMuPDF
+def extract_text_from_pdf(filepath: str) -> str:
+    """Extracts all text from a PDF file."""
+    text = ""
+    with fitz.open(filepath) as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
 
+def load_remote_pdf(self, pdf_url: str):
+    try:
+        response = requests.get(pdf_url)
+        reader = PdfReader(BytesIO(response.content))
+        pages = []
+
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text:
+                pages.append(Document(page_content=text, metadata={"source": pdf_url, "page": i}))
+
+        logger.info(f"Loaded {len(pages)} pages from remote PDF")
+        return pages
+    except Exception as e:
+        logger.error(f"Failed to load remote PDF: {e}")
+        return []
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,6 +105,8 @@ class RAGSystem:
         hash_input = json.dumps(pdf_files, sort_keys=True)
         return hashlib.md5(hash_input.encode()).hexdigest()
 
+    
+    
     def should_rebuild_chroma_db(self):
         """Check if ChromaDB should be rebuilt based on PDF files."""
         current_hash = self.get_pdf_files_hash()
