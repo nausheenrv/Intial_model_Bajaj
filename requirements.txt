@@ -1,16 +1,64 @@
-fastapi
-uvicorn
-httpx
-langchain-core
-langchain-community
-langchain-text-splitters
-langchain-chroma
-langchain-ollama
-transformers
-torch
-requests
-pathlib
-pydantic
-PyPDF2
-google-generativeai
+# fastapi
+# uvicorn
+# httpx
+# langchain-core
+# langchain-community
+# langchain-text-splitters
+# langchain-chroma
+# langchain-ollama
+# transformers
+# torch
+# requests
+# pathlib
+# pydantic
+# PyPDF2
+# PyMuPDF==1.24.2
+# google-generativeai
 
+# Core LangChain dependencies
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-core==0.1.52
+langchain-text-splitters==0.0.1
+langchain-chroma==0.1.2
+langchain-ollama==0.1.0
+
+# Vector database
+chromadb==0.4.24
+
+# Embeddings and models
+ollama>=0.1.7
+
+# Hugging Face transformers for classification
+transformers==4.40.1
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Google Generative AI (Gemini)
+google-generativeai>=0.5.0
+
+# PDF processing
+PyPDF2==3.0.1
+PyMuPDF==1.24.2
+
+# Vector store alternatives
+faiss-cpu==1.7.4
+
+# HTTP requests
+requests==2.31.0
+
+# Standard library enhancements (usually included but listing for completeness)
+hashlib2>=1.0.0
+
+# Optional: For better logging and configuration
+python-dotenv==1.0.0
+
+# Optional: For API development if you plan to create web endpoints
+flask==2.3.3
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Optional: For Jupyter notebook development
+jupyter==1.0.0
+ipython==8.18.1
