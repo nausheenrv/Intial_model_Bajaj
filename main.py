@@ -7,73 +7,16 @@ import os
 import tempfile
 import requests
 from pathlib import Path
-from extract import extract_text_from_pdf
+from extract import query_rag_api, RAGSystem  # Import your RAG system
 
 app = FastAPI(title="Q.4 Retrieval System API", version="1.0.0")
 
 # Expected Bearer token (you should change this)
 EXPECTED_TOKEN = "7c49d0c1af87904647ed2d5803a1f9678d7960387ad9c10ecb72e9ef27456e2b"
 
-# Simple working functions
-def load_documents():
-    """Load documents from pdfs directory"""
-    pdfs_dir = Path("pdfs")
-    documents = []
-    
-    if pdfs_dir.exists():
-        for pdf_file in pdfs_dir.glob("*.pdf"):
-            documents.append({
-                "content": f"Document content from {pdf_file.name}",
-                "source": str(pdf_file)
-            })
-    
-    return documents
-
-def split_documents(documents):
-    """Split documents into chunks"""
-    chunks = []
-    for doc in documents:
-        # Simple chunking
-        content = doc.get("content", "")
-        # Split into chunks of 1000 characters
-        for i in range(0, len(content), 1000):
-            chunk = content[i:i+1000]
-            chunks.append({
-                "content": chunk,
-                "source": doc.get("source", "unknown")
-            })
-    return chunks
-
-def add_to_chroma(chunks):
-    """Add chunks to ChromaDB - placeholder"""
-    print(f"Added {len(chunks)} chunks to ChromaDB")
-    return chunks
-
-def query_rag(question, chunks):
-    """Query the RAG system - simple implementation"""
-    # Simple keyword matching
-    relevant_chunks = []
-    question_words = question.lower().split()
-    
-    for chunk in chunks:
-        content = chunk.get("content", "").lower()
-        if any(word in content for word in question_words):
-            relevant_chunks.append(chunk)
-    
-    if relevant_chunks:
-        response = f"Based on the document, here's information about '{question}': {relevant_chunks[0]['content'][:200]}..."
-    else:
-        response = f"I found information related to your question: {question}. The document contains relevant details that address this query."
-    
-    return {"response": response}
-
 class DocumentRequest(BaseModel):
     documents: HttpUrl
     questions: List[str]
-
-class Answer(BaseModel):
-    answer: str
-    source: Optional[str] = None
 
 class DocumentResponse(BaseModel):
     answers: List[str]
@@ -98,9 +41,14 @@ async def download_pdf(url: str, filename: str) -> str:
     
     filepath = pdfs_dir / filename
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:  # Add timeout
         response = await client.get(url)
         response.raise_for_status()
+        
+        # Verify it's actually a PDF
+        content_type = response.headers.get('content-type', '').lower()
+        if 'pdf' not in content_type and not url.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="URL does not point to a PDF file")
         
         with open(filepath, "wb") as f:
             f.write(response.content)
@@ -130,39 +78,43 @@ async def run_submissions(
         await download_pdf(str(request.documents), pdf_filename)
         print(f"Downloaded: {pdf_filename}")
         
-        # Load and process documents
-        print("Loading documents...")
-        print("Extracting text from PDF...")
-        pdf_path = f"pdfs/{pdf_filename}"
-        pdf_text = extract_text_from_pdf(pdf_path)
-
-        documents = [{
-            "content": pdf_text,
-            "source": pdf_filename
-        }]
-
+        # Initialize RAG system - this will automatically process the PDF
+        print("Initializing RAG system...")
+        rag_system = RAGSystem()
         
-        print(f"Loaded {len(documents)} documents")
+        # The RAG system will automatically detect the new PDF and rebuild the database
+        success = rag_system.initialize_or_update_chroma_db()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to initialize RAG system")
         
-        print("Splitting documents...")
-        chunks = split_documents(documents)
-        print(f"Created {len(chunks)} chunks")
+        print("RAG system initialized successfully")
         
-        print("Adding to ChromaDB...")
-        add_to_chroma(chunks)
-        
-        # Process each question
+        # Process each question using the RAG system
         answers = []
         for question in request.questions:
             print(f"Processing question: {question}")
             
             try:
-                response_data = query_rag(question, chunks)
-                answers.append(response_data["response"])
+                # Use your sophisticated RAG system
+                result = query_rag_api(question)
+                
+                if result.get("error"):
+                    print(f"RAG system error: {result['error']}")
+                    # Fallback answer
+                    answers.append("I encountered an issue processing this question. Please try rephrasing it.")
+                else:
+                    # Extract just the answer text
+                    answer = result.get("response", "").strip()
+                    if answer:
+                        answers.append(answer)
+                    else:
+                        answers.append("I couldn't find a specific answer to this question in the document.")
+                
                 print(f"Generated answer for: {question}")
+                
             except Exception as e:
                 print(f"Error processing question '{question}': {str(e)}")
-                answers.append(f"I'm processing your question about: {question}. Please check the document for specific details.")
+                answers.append("I encountered an error while processing this question.")
         
         print(f"Returning {len(answers)} answers")
         return DocumentResponse(answers=answers)
