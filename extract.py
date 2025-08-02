@@ -330,8 +330,10 @@ class RAGSystem:
             try:
                 hyde_model = GenerativeModel("gemini-1.5-pro")
                 hyde_response = hyde_model.generate_content(
-                    f"Answer this question briefly (hypothetical answer, even if not grounded): {query_text}"
-                )
+    f"Generate a concise, factual, and domain-specific hypothetical answer to the question below. "
+    f"Do not generalize or include irrelevant details.\n\nQuestion: {query_text}"
+)
+
                 hypothetical_answer = hyde_response.text
             except Exception as e:
                 logger.warning(f"HyDE generation failed: {e}, using original query")
@@ -353,14 +355,20 @@ class RAGSystem:
             retrieval_end = time.time()
 
             # Prompt preparation
-            prompt_start = time.time()
             PROMPT_TEMPLATE = """
-Answer the question based only on the following context:
+Given the context below, provide a precise, factual, and grounded answer. 
+Avoid assumptions or hallucinated content. If the answer is not found in the context, say so.
+
+Context:
 {context}
 
----
-Answer the question: {question}
+Question:
+{question}
+
+Answer:
 """
+
+
             top_docs = [doc for doc, _ in results]
             context_text = "\n\n---\n\n".join([doc.page_content for doc in top_docs])
             
