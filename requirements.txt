@@ -11,3 +11,6 @@ torch
 requests
 pathlib
 pydantic
+PyPDF2
+google-generativeai
+
