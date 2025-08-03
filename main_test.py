@@ -4,13 +4,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Depends
 import os
 import requests
-import fitz  # PyMuPDF
+from pypdf import PdfReader
+from io import BytesIO
 import logging
 
 app = FastAPI()
 
 # Create a pdfs directory if it doesn't exist
-os.makedirs('pdfs', exist_ok=True)
+# os.makedirs('pdfs', exist_ok=True)
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -148,25 +149,18 @@ async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials
             )
 
         # Generate a unique filename
-        import uuid
-        pdf_filename = f"document_{uuid.uuid4().hex[:8]}.pdf"
-        pdf_path = f"pdfs/{pdf_filename}"
+        logger.info(f"PDF downloaded, size: {len(pdf_response.content)} bytes")
 
-        with open(pdf_path, "wb") as pdf_file:
-            pdf_file.write(pdf_response.content)
-
-        logger.info(f"PDF saved to: {pdf_path}")
-
-        # Process PDF
+        # Process PDF directly from memory
         try:
-            doc = fitz.open(pdf_path)
+            pdf_file = BytesIO(pdf_response.content)
+            reader = PdfReader(pdf_file)
             text = ""
-            for page_num, page in enumerate(doc):
-                page_text = page.get_text()
+            for page_num, page in enumerate(reader.pages):
+                page_text = page.extract_text()
                 text += page_text
                 logger.info(f"Extracted text from page {page_num + 1}, length: {len(page_text)}")
-
-            doc.close()
+            
             logger.info(f"Total text extracted: {len(text)} characters")
 
         except Exception as e:
@@ -185,11 +179,7 @@ async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials
             formatted_answer = f"{i}. {answer}"
             formatted_answers.append(formatted_answer)
         
-        # Clean up the PDF file
-        try:
-            os.remove(pdf_path)
-        except:
-            pass  # Ignore cleanup errors
+        
 
         logger.info(f"Generated {len(formatted_answers)} answers")
         return JSONResponse(content={"answers": formatted_answers})

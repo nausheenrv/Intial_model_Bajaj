@@ -2,10 +2,9 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 requests==2.31.0
-
+pypdf==3.17.4
 # PDF processing
-PyMuPDF==1.23.14
-pypdf==5.9.0
+
 
 # LangChain core and community modules
 langchain==0.3.27
