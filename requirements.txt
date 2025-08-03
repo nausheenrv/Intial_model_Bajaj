@@ -4,7 +4,7 @@ uvicorn[standard]==0.24.0
 requests==2.31.0
 
 # PDF processing
-PyMuPDF==1.23.14
+
 pypdf==5.9.0
 
 # LangChain ecosystem (keep exact - frequently breaking changes)
@@ -35,3 +35,4 @@ typing-extensions>=4.12.0
 tqdm>=4.66.0
 pydantic>=2.9.0,<3.0.0
 psutil>=6.1.0
+
