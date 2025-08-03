@@ -1,0 +1,32 @@
+# FastAPI and server dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+requests==2.31.0
+PyMuPDF==1.23.14
+
+# LangChain core and community modules
+langchain==0.3.27
+langchain-community==0.3.27
+langchain-core==0.3.72
+langchain-text-splitters==0.3.9
+langchain-chroma==0.2.5
+
+# Chroma vector store
+chromadb==1.0.15
+
+# Google Generative AI (for production use instead of Ollama)
+google-generativeai==0.4.0
+
+# HuggingFace embeddings
+sentence-transformers==2.7.0
+
+# For PDF loading (alternative to PyMuPDF)
+pypdf==5.9.0
+
+# For typing support
+typing-extensions==4.14.1
+
+# Utility libraries
+tqdm==4.67.1
+numpy==2.3.2
+pydantic==2.11.7

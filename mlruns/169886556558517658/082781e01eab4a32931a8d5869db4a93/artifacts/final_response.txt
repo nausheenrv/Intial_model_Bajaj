@@ -1,0 +1,15 @@
+ The cancellation policy for the insurance policy outlined in the context allows for cancellation within certain conditions and timeframes. Here are the key points:
+
+1. The insurance company has the right to cancel the policy at any time due to misrepresentation, non-disclosure of material facts, or fraud by the insured person, with no refund provided in such cases.
+
+2. If the policy is cancelled for reasons other than those mentioned above, a premium refund will be given based on the remaining Policy Period:
+   - If full premium was paid at inception, the refund percentage varies depending on the duration of the Policy Period.
+   - If premium is paid in installments, the refund percentage is calculated using a table that considers the period in risk from the latest installment date.
+
+3. There is a free look period of up to 15 days after policy inception during which the policy can be cancelled without any penalty.
+
+When it comes to claims, the company has 30 days to complete its investigation and 45 days to settle or reject the claim. If a delay occurs, interest will be paid to the policyholder at a rate 2% above the bank rate from the date of receipt of last necessary document to the date of payment of claim.
+
+The company can renew the policy without denying it due to past claims and must receive the request for renewal along with premium before the end of the Policy Period. A grace period of 30 days is given to maintain continuity of benefits, but coverage is not available during the grace period. No loading will be applied on renewals based on individual claims experience.
+
+Lastly, if the product is withdrawn, the insured person will be informed 90 days prior to the expiry of the Policy.
