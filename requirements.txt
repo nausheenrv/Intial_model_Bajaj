@@ -6,6 +6,7 @@ requests==2.31.0
 # PDF processing
 
 pypdf==5.9.0
+pymupdf!=1.0.0 
 
 # LangChain ecosystem (keep exact - frequently breaking changes)
 langchain==0.3.27
@@ -35,4 +36,5 @@ typing-extensions>=4.12.0
 tqdm>=4.66.0
 pydantic>=2.9.0,<3.0.0
 psutil>=6.1.0
+
 
