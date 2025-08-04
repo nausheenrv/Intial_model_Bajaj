@@ -636,7 +636,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 import google.generativeai as genai
@@ -655,7 +654,8 @@ class EnhancedRAGPipeline:
         Args:
             api_key: Google API key for Gemini
             chroma_path: Path for persistent Chroma database
-            use_huggingface: Whether to use HuggingFace embeddings instead of Ollama (default: False)
+            use_huggingface: Deprecated parameter, now always uses HuggingFace embeddings
+      
         """
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
@@ -669,25 +669,37 @@ class EnhancedRAGPipeline:
         self.use_huggingface = use_huggingface
         
         # Choose embedding function - Default to Ollama
-        if use_huggingface:
-            try:
-                self.embedding_function = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-                logger.info("Using HuggingFace embeddings (all-MiniLM-L6-v2)")
-            except Exception as e:
-                logger.warning(f"HuggingFace not available, falling back to Ollama: {e}")
-                self.embedding_function = OllamaEmbeddings(model="nomic-embed-text")
-        else:
-            try:
-                self.embedding_function = OllamaEmbeddings(model="nomic-embed-text")
-                logger.info("Using Ollama embeddings (nomic-embed-text)")
-            except Exception as e:
-                logger.warning(f"Ollama not available, falling back to HuggingFace: {e}")
-                self.embedding_function = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-        
+        # if use_huggingface:
+        #     try:
+        #         self.embedding_function = HuggingFaceEmbeddings(
+        #             model_name="sentence-transformers/all-MiniLM-L6-v2"
+        #         )
+        #         logger.info("Using HuggingFace embeddings (all-MiniLM-L6-v2)")
+        #     except Exception as e:
+        #         logger.warning(f"HuggingFace not available, falling back to Ollama: {e}")
+        #         self.embedding_function = OllamaEmbeddings(model="nomic-embed-text")
+        # else:
+        #     try:
+        #         self.embedding_function = OllamaEmbeddings(model="nomic-embed-text")
+        #         logger.info("Using Ollama embeddings (nomic-embed-text)")
+        #     except Exception as e:
+        #         logger.warning(f"Ollama not available, falling back to HuggingFace: {e}")
+        #         self.embedding_function = HuggingFaceEmbeddings(
+        #             model_name="sentence-transformers/all-MiniLM-L6-v2"
+        #         )
+           
+        # Choose embedding function - Default to HuggingFace (most compatible)
+        try:
+            self.embedding_function = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},  # Force CPU for cloud deployment
+            encode_kwargs={'normalize_embeddings': True}
+    )
+            logger.info("Using HuggingFace embeddings (all-MiniLM-L6-v2)")
+        except Exception as e:
+            logger.error(f"HuggingFace embeddings failed: {e}")
+            raise RuntimeError("Failed to initialize embeddings. Please check your environment.")
+       
         # Text splitter for document chunking
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=800,
@@ -1148,7 +1160,8 @@ Please provide a direct answer without any numbering, bullet points, or prefixes
                 "total_documents": len(existing_items["ids"]) if existing_items["ids"] else 0,
                 "database_path": self.chroma_path,
                 "database_exists": True,
-                "embedding_model": "HuggingFace (all-MiniLM-L6-v2)" if self.use_huggingface else "Ollama (nomic-embed-text)"
+                # "embedding_model": "HuggingFace (all-MiniLM-L6-v2)" if self.use_huggingface else "Ollama (nomic-embed-text)"
+                "embedding_model": "HuggingFace (all-MiniLM-L6-v2)"
             }
             
             # Count unique sources
