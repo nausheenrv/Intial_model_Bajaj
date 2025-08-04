@@ -3,18 +3,14 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import os
 import requests
-# import fitz  # PyMuPDF
 import logging
-# import uuid
-import google.generativeai as genai
-from google.generativeai import GenerativeModel
 from pypdf import PdfReader
 from io import BytesIO
 
-app = FastAPI()
+# Import your RAG pipeline
+from rag_pipeline import EnhancedRAGPipeline
 
-# Create a pdfs directory if it doesn't exist
-# os.makedirs('pdfs', exist_ok=True)
+app = FastAPI()
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -25,114 +21,59 @@ API_TOKEN = '7c49d0c1af87904647ed2d5803a1f9678d7960387ad9c10ecb72e9ef27456e2b'
 
 security = HTTPBearer()
 
-def find_complete_sentences(text: str, keyword: str, max_sentences: int = 3) -> list:
-    """Find complete sentences containing the keyword"""
-    sentences = []
-    # Split text into sentences more intelligently
-    import re
-    sentence_endings = re.split(r'(?<=[.!?])\s+', text)
-    
-    for sentence in sentence_endings:
-        sentence = sentence.strip()
-        if len(sentence) > 20 and keyword.lower() in sentence.lower():
-            sentences.append(sentence)
-            if len(sentences) >= max_sentences:
-                break
-    
-    return sentences
+# Initialize RAG pipeline globally
+rag_pipeline = None
 
-def extract_relevant_text(text: str, question: str) -> str:
-    """Extract relevant text segments based on keywords in the question"""
-    # Extract keywords from question
-    keywords = []
-    if "grace period" in question.lower():
-        keywords.extend(["grace period", "thirty days", "30 days"])
-    elif "ayush" in question.lower():
-        keywords.extend(["ayush", "alternative medicine", "homeopathy", "unani", "siddha"])
-    elif "waiting period" in question.lower() and "pre-existing" in question.lower():
-        keywords.extend(["pre-existing", "thirty-six months", "36 months", "continuous coverage"])
-    elif "waiting period" in question.lower() and "cataract" in question.lower():
-        keywords.extend(["cataract", "two years", "2 years"])
-    elif "maternity" in question.lower():
-        keywords.extend(["maternity", "childbirth", "24 months", "pregnancy"])
-    elif "organ donor" in question.lower():
-        keywords.extend(["organ donor", "harvesting", "transplantation"])
-    elif "no claim discount" in question.lower() or "ncd" in question.lower():
-        keywords.extend(["no claim discount", "ncd", "5%", "renewal"])
-    elif "health check" in question.lower():
-        keywords.extend(["health check", "preventive", "check-up"])
-    elif "hospital" in question.lower() and "define" in question.lower():
-        keywords.extend(["hospital", "inpatient beds", "10 inpatient beds", "15 beds"])
-    elif "room rent" in question.lower() or "icu charges" in question.lower():
-        keywords.extend(["room rent", "icu charges", "1% of sum insured", "2% of sum insured"])
-    else:
-        # Extract key words from question
-        words = question.lower().replace('?', '').split()
-        keywords = [word for word in words if len(word) > 3]
+def initialize_rag_pipeline():
+    """Initialize the RAG pipeline with API key"""
+    global rag_pipeline
+    api_key = os.getenv('GOOGLE_API_KEY', 'AIzaSyCzK5gdfDGmPcQENRHdC6AhDfMh3gkwAWY')
     
-    # Find relevant sentences
-    all_sentences = []
-    for keyword in keywords:
-        sentences = find_complete_sentences(text, keyword, 2)
-        all_sentences.extend(sentences)
-    
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_sentences = []
-    for sentence in all_sentences:
-        if sentence not in seen:
-            seen.add(sentence)
-            unique_sentences.append(sentence)
-    
-    return "\n\n".join(unique_sentences[:3])  # Return top 3 unique sentences
+    try:
+        rag_pipeline = EnhancedRAGPipeline(
+            api_key=api_key,
+            chroma_path="chroma_db",
+            use_huggingface=False  # Using Ollama by default, will fallback to HuggingFace if needed
+        )
+        logger.info("RAG pipeline initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize RAG pipeline: {str(e)}")
+        return False
 
-def gemini_qa(text: str, questions: list) -> list:
-    """Use Google Gemini to answer questions based on the document text"""
-    # Initialize Gemini
-    api_key = os.getenv('GOOGLE_API_KEY', 'AIzaSyCzK5gdfDGmPcQENRHdC6AhDfMh3gkwAWY')  # fallback to provided key
-    genai.configure(api_key=api_key)
-    model = GenerativeModel("gemini-1.5-pro")
-    
-    answers = []
-    
-    for question in questions:
-        logger.info(f"Processing question with Gemini: {question}")
+def process_pdf_with_rag(pdf_content: bytes, questions: list) -> list:
+    """Process PDF content using RAG pipeline"""
+    try:
+        # Extract text from PDF
+        pdf_file = BytesIO(pdf_content)
+        reader = PdfReader(pdf_file)
+        text = ""
+        for page_num, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            text += page_text
+            logger.info(f"Extracted text from page {page_num + 1}, length: {len(page_text)}")
         
-        # Create a prompt for Gemini with the ENTIRE document
-        prompt = f"""
-You are an expert insurance policy analyst. Based on the following complete insurance policy document, please answer the question accurately and concisely.
+        logger.info(f"Total text extracted: {len(text)} characters")
 
-Complete Document Content:
-{text}
+        if not text.strip():
+            raise ValueError("Downloaded PDF is empty or unreadable")
 
-Question: {question}
-
-Please provide a direct, accurate answer based solely on the information in the document. Search through the entire document carefully to find the relevant information. If the information is not available in the document, clearly state that. Format your response as a complete sentence.
-
-Answer:"""
+        # Create vector store from the extracted text
+        logger.info("Creating vector store from PDF content...")
+        rag_pipeline.create_vector_store_from_text(text, "current_pdf_document")
         
-        try:
-            response = model.generate_content(prompt)
-            answer = response.text.strip()
-            
-            # Clean up the answer
-            if answer.startswith("Answer:"):
-                answer = answer[7:].strip()
-            
-            answers.append(answer)
-            logger.info(f"Gemini generated answer: {answer[:100]}...")
-            
-        except Exception as e:
-            logger.error(f"Error with Gemini API: {str(e)}")
-            # Fallback to text search if Gemini fails
-            relevant_text = extract_relevant_text(text, question)
-            if relevant_text.strip():
-                fallback_answer = f"Based on the document: {relevant_text[:300]}..."
-                answers.append(fallback_answer)
-            else:
-                answers.append(f"I cannot find information about '{question}' in the provided document.")
-    
-    return answers
+        # Process questions using RAG
+        logger.info(f"Processing {len(questions)} questions with RAG pipeline...")
+        results = rag_pipeline.process_questions(questions, include_metrics=False)
+        
+        # Extract just the answers
+        answers = [result.get("answer", "Unable to generate answer") for result in results]
+        
+        return answers
+
+    except Exception as e:
+        logger.error(f"Error processing PDF with RAG: {str(e)}")
+        raise
 
 @app.post("/hackrx/run")
 async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -142,6 +83,14 @@ async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Initialize RAG pipeline if not already done
+    if rag_pipeline is None:
+        if not initialize_rag_pipeline():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to initialize RAG pipeline"
+            )
 
     try:
         body = await request.json()
@@ -173,42 +122,17 @@ async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials
 
         logger.info(f"PDF downloaded, size: {len(pdf_response.content)} bytes")
 
-        # Process PDF directly from memory
+        # Process PDF using RAG pipeline instead of direct Gemini
         try:
-            pdf_file = BytesIO(pdf_response.content)
-            reader = PdfReader(pdf_file)
-            text = ""
-            for page_num, page in enumerate(reader.pages):
-                page_text = page.extract_text()
-                text += page_text
-                logger.info(f"Extracted text from page {page_num + 1}, length: {len(page_text)}")
+            answers = process_pdf_with_rag(pdf_response.content, body["questions"])
+            logger.info(f"Generated {len(answers)} answers using RAG pipeline")
             
-            logger.info(f"Total text extracted: {len(text)} characters")
-
         except Exception as e:
-            logger.error(f"Error processing PDF: {str(e)}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to process PDF file")
+            logger.error(f"Error processing PDF with RAG: {str(e)}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to process PDF file: {str(e)}")
 
-        if not text.strip():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Downloaded PDF is empty or unreadable")
-
-        # Process questions through Gemini QA
-        answers = gemini_qa(text, body["questions"])
-        
-        # Clean up the PDF file
-        try:
-            os.remove(pdf_path)
-        except:
-            pass  # Ignore cleanup errors
-
-        logger.info(f"Generated {len(answers)} answers")
-        
-        # Format answers with better readability
-        formatted_answers = []
-        for i, answer in enumerate(answers, 1):
-            formatted_answers.append(f"{i}. {answer}")
-        
-        return JSONResponse(content={"answers": formatted_answers})
+        # Return answers without numbering
+        return JSONResponse(content={"answers": answers})
 
     except HTTPException:
         raise
@@ -220,7 +144,32 @@ async def run_hackrx(request: Request, credentials: HTTPAuthorizationCredentials
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/rag-status")
+async def rag_status():
+    """Check RAG pipeline status and database statistics"""
+    if rag_pipeline is None:
+        return {"status": "not_initialized", "message": "RAG pipeline not initialized"}
+    
+    try:
+        stats = rag_pipeline.get_database_stats()
+        return {
+            "status": "initialized",
+            "database_stats": stats
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error getting RAG status: {str(e)}"
+        }
+
+# Initialize RAG pipeline on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize RAG pipeline when the app starts"""
+    logger.info("Starting up FastAPI application...")
+    if not initialize_rag_pipeline():
+        logger.warning("RAG pipeline initialization failed during startup")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

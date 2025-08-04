@@ -99,12 +99,34 @@ class EnhancedRAGPipeline:
         except Exception as e:
             logger.error(f"Error checking database: {e}")
             return False
+
+    #ADDED DEF CLEAN NUMBERED RESPONSE
     
+    def _clean_numbered_response(self, response: str) -> str:
+        """Remove numbering from AI responses (1., 2., 3., etc.)"""
+        import re
+        # Remove patterns like "1. ", "2. ", "3. " at the beginning of the response
+        cleaned = re.sub(r'^\d+\.\s*', '', response.strip())
+        # Also remove patterns like "1)", "2)", "3)" at the beginning
+        cleaned = re.sub(r'^\d+\)\s*', '', cleaned)
+        return cleaned.strip()
+    
+    # def _invoke_gemini(self, prompt: str, model: str = "gemini-1.5-pro") -> str:
+    #     """Wrapper for Gemini API calls"""
+    #     try:
+    #         response = self.model.generate_content(prompt)
+    #         return response.text.strip()
+    #     except Exception as e:
+    #         logger.error(f"Gemini API error: {e}")
+    #         raise
+
     def _invoke_gemini(self, prompt: str, model: str = "gemini-1.5-pro") -> str:
         """Wrapper for Gemini API calls"""
         try:
             response = self.model.generate_content(prompt)
-            return response.text.strip()
+            # Clean numbered responses
+            cleaned_response = self._clean_numbered_response(response.text.strip())
+            return cleaned_response
         except Exception as e:
             logger.error(f"Gemini API error: {e}")
             raise
@@ -376,12 +398,21 @@ class EnhancedRAGPipeline:
                 print(f"Reduction: {((len(context_text) - len(summary)) / len(context_text) * 100):.1f}%")
             
             # Create prompt template
+#             PROMPT_TEMPLATE = """
+# Answer the question based only on the following context:
+# {context}
+
+# ---
+# Answer the question: {question}
+# """
             PROMPT_TEMPLATE = """
 Answer the question based only on the following context:
 {context}
 
 ---
 Answer the question: {question}
+
+Please provide a direct answer without any numbering, bullet points, or prefixes.
 """
             
             prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
