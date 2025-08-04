@@ -639,7 +639,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 # from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+# from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 import google.generativeai as genai
@@ -693,15 +694,15 @@ class EnhancedRAGPipeline:
         #         )
            
         # Choose embedding function - Default to HuggingFace (most compatible)
+        # Choose embedding function - Default to Google Generative AI
         try:
-            self.embedding_function = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2",
-            model_kwargs={'device': 'cpu'},  # Force CPU for cloud deployment
-            encode_kwargs={'normalize_embeddings': True}
+            self.embedding_function = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=self.api_key
     )
-            logger.info("Using HuggingFace embeddings (all-MiniLM-L6-v2)")
+            logger.info("Using Google Generative AI embeddings (embedding-001)")
         except Exception as e:
-            logger.error(f"HuggingFace embeddings failed: {e}")
+            logger.error(f"Google Generative AI embeddings failed: {e}")
             raise RuntimeError("Failed to initialize embeddings. Please check your environment.")
        
         # Text splitter for document chunking
@@ -988,11 +989,39 @@ class EnhancedRAGPipeline:
                 }
             
             # Load existing vector store
-            db = Chroma(
-                persist_directory=self.chroma_path,
-                embedding_function=self.embedding_function
-            )
+            # db = Chroma(
+            #     persist_directory=self.chroma_path,
+            #     embedding_function=self.embedding_function
+            # )
             
+            # Load existing vector store and check embedding compatibility
+            try:
+                db = Chroma(
+                    persist_directory=self.chroma_path,
+                    embedding_function=self.embedding_function
+                )
+                # Test compatibility with a small query
+                db.similarity_search("test", k=1)
+            except Exception as e:
+                if "dimension" in str(e).lower():
+                    logger.warning(f"Embedding dimension mismatch detected. Clearing database: {e}")
+                    self.clear_database()
+                    error_msg = (
+                        "❌ VECTOR DATABASE CLEARED DUE TO EMBEDDING MISMATCH!\n"
+                        f"Database path: {self.chroma_path}\n"
+                        "Please add documents first using:\n"
+                        "- pipeline.add_pdf_documents('pdf_directory')\n"
+                        "- pipeline.create_vector_store_from_text('your_text', 'source_name')\n"
+                        "- Or run with --load-pdfs argument"
+                    )
+                    return {
+                        "question": query_text,
+                        "answer": error_msg,
+                        "query_type": "error",
+                        "processing_time": time.time() - start_time if include_metrics else None
+                    }
+                else:
+                    raise e
             # Classify query
             query_type = self.classify_query(query_text)
             logger.info(f"Query classified as: {query_type}")
@@ -1040,7 +1069,7 @@ class EnhancedRAGPipeline:
                 print(f"Original context length: {len(context_text)} chars")
                 print(f"Summarized context length: {len(summary)} chars")
                 print(f"Reduction: {((len(context_text) - len(summary)) / len(context_text) * 100):.1f}%")
-            
+     
             # Create prompt template
 #             PROMPT_TEMPLATE = """
 # Answer the question based only on the following context:
@@ -1165,7 +1194,8 @@ Please provide a direct answer without any numbering, bullet points, or prefixes
                 "database_path": self.chroma_path,
                 "database_exists": True,
                 # "embedding_model": "HuggingFace (all-MiniLM-L6-v2)" if self.use_huggingface else "Ollama (nomic-embed-text)"
-                "embedding_model": "HuggingFace (sentence-transformers/paraphrase-MiniLM-L3-v2)"
+                "embedding_model": "Google Generative AI (embedding-001)"
+                
             }
             
             # Count unique sources
@@ -1185,6 +1215,19 @@ Please provide a direct answer without any numbering, bullet points, or prefixes
         except Exception as e:
             logger.error(f"Error getting database stats: {e}")
             return {"error": str(e), "database_exists": False}
+    def clear_database(self):
+        """Clear the existing vector database"""
+        import shutil
+        try:
+            if os.path.exists(self.chroma_path):
+                shutil.rmtree(self.chroma_path)
+                logger.info(f"Cleared database at {self.chroma_path}")
+                print(f"✅ Cleared database at {self.chroma_path}")
+            else:
+                 logger.info("Database directory doesn't exist, nothing to clear")
+        except Exception as e:
+             logger.error(f"Error clearing database: {e}")
+        raise    
 
 # Global instance
 enhanced_rag_pipeline = None

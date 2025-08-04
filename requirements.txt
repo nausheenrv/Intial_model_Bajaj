@@ -17,7 +17,8 @@ langchain-community==0.3.27
 langchain-core==0.3.72
 langchain-text-splitters==0.3.9
 langchain-chroma==0.2.4
-langchain-huggingface>=0.0.1
+langchain-google-genai
+
 
 #langchain-ollama==0.3.6
 
