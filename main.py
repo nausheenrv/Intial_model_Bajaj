@@ -579,6 +579,11 @@ async def startup_event():
     if not initialize_rag_pipeline():
         logger.warning("RAG pipeline initialization failed during startup")
 
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    port = int(os.environ.get("PORT", 10000))  # fallback for local
+    uvicorn.run(app, host="0.0.0.0", port=port)
