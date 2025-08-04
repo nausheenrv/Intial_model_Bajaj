@@ -625,6 +625,9 @@
 #                 print(f"\nNo database found. Use --load-pdfs to add documents.")
 #         except Exception as e:
 #             print(f"\n Error checking database: {e}")
+import os
+os.environ['TRANSFORMERS_CACHE'] = '/tmp/huggingface'
+os.environ['HF_HOME'] = '/tmp/huggingface'
 
 import os
 import tempfile
@@ -692,7 +695,7 @@ class EnhancedRAGPipeline:
         # Choose embedding function - Default to HuggingFace (most compatible)
         try:
             self.embedding_function = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2",
             model_kwargs={'device': 'cpu'},  # Force CPU for cloud deployment
             encode_kwargs={'normalize_embeddings': True}
     )
@@ -1162,7 +1165,7 @@ Please provide a direct answer without any numbering, bullet points, or prefixes
                 "database_path": self.chroma_path,
                 "database_exists": True,
                 # "embedding_model": "HuggingFace (all-MiniLM-L6-v2)" if self.use_huggingface else "Ollama (nomic-embed-text)"
-                "embedding_model": "HuggingFace (sentence-transformers/all-MiniLM-L6-v2)"
+                "embedding_model": "HuggingFace (sentence-transformers/paraphrase-MiniLM-L3-v2)"
             }
             
             # Count unique sources
