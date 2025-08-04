@@ -635,7 +635,8 @@ from typing import List, Optional, Dict, Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 import google.generativeai as genai
@@ -1161,7 +1162,7 @@ Please provide a direct answer without any numbering, bullet points, or prefixes
                 "database_path": self.chroma_path,
                 "database_exists": True,
                 # "embedding_model": "HuggingFace (all-MiniLM-L6-v2)" if self.use_huggingface else "Ollama (nomic-embed-text)"
-                "embedding_model": "HuggingFace (all-MiniLM-L6-v2)"
+                "embedding_model": "HuggingFace (sentence-transformers/all-MiniLM-L6-v2)"
             }
             
             # Count unique sources
