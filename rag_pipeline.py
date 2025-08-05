@@ -629,7 +629,6 @@ import os
 os.environ['TRANSFORMERS_CACHE'] = '/tmp/huggingface'
 os.environ['HF_HOME'] = '/tmp/huggingface'
 
-import os
 import tempfile
 import uuid
 import time
@@ -1079,15 +1078,18 @@ class EnhancedRAGPipeline:
 # Answer the question: {question}
 # """
             PROMPT_TEMPLATE = """
-Answer the question based only on the following context:
+
+You are a helpful assistant. Answer the user's question using only the information provided in the context.
+
 {context}
 
 ---
 Answer the question: {question}
 
 Please provide a direct answer without any numbering, bullet points, or prefixes.
+
 """
-            
+       
             prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
             prompt = prompt_template.format(context=summary, question=query_text)
             
