@@ -4,270 +4,217 @@ os.environ['HF_HOME'] = '/tmp/huggingface'
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['OMP_NUM_THREADS'] = '1'
 
-import tempfile
-import uuid
 import time
 import json
 import hashlib
+import logging
 from typing import List, Optional, Dict, Any
+from collections import OrderedDict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 import google.generativeai as genai
 from google.generativeai import GenerativeModel
-import logging
 
-# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class LightweightRAGPipeline:
+    DEFAULT_CHUNK_SIZE = 1000  # Increased from 600 for better context
+    DEFAULT_OVERLAP = 200      # Increased from 50 for better continuity
+    DEFAULT_MAX_CACHE_SIZE = 20
+    DEFAULT_BATCH_SIZE = 10
+    DEFAULT_MAX_OUTPUT_TOKENS = 1024  # Increased from 512 for more detailed answers
+    DEFAULT_MAX_DOCS_PDF = 10
+    DEFAULT_MAX_CHUNKS_TEXT = 50      # Increased from 30
+    DEFAULT_MAX_CHUNKS_SPLIT = 300    # Increased from 200
+
     def __init__(self, api_key: str = None, chroma_path: str = "chroma_db"):
-        """Initialize lightweight RAG pipeline optimized for Render free tier"""
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("Google API key is required. Set GOOGLE_API_KEY environment variable.")
-        
+
         genai.configure(api_key=self.api_key)
-        
+
         self.model = GenerativeModel(
             "gemini-1.5-flash",
             generation_config={
                 "temperature": 0.1,
                 "top_p": 0.8,
                 "top_k": 10,
-                "max_output_tokens": 512,
+                "max_output_tokens": self.DEFAULT_MAX_OUTPUT_TOKENS,
             }
         )
-        
+
         self.chroma_path = chroma_path
-        self.query_cache = {}
-    
-        self.max_cache_size = 20
-        
+        self.query_cache = OrderedDict()  # LRU-style cache
         self.embedding_function = GoogleGenerativeAIEmbeddings(
             model="models/text-embedding-004",
             google_api_key=self.api_key,
             task_type="retrieval_document"
         )
-       
+
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=600,
-            chunk_overlap=50,
+            chunk_size=self.DEFAULT_CHUNK_SIZE,
+            chunk_overlap=self.DEFAULT_OVERLAP,
             length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""],  # Better separators for policy documents
         )
-        
+
         self.db = None
-    
+
     def _get_db(self):
-        """Lazy database connection"""
         if self.db is None:
             try:
-                self.db = Chroma(embedding_function=self.embedding_function) 
+                self.db = Chroma(
+                    embedding_function=self.embedding_function,
+                    persist_directory=self.chroma_path
+                )
             except Exception as e:
-               
+                logging.error("Database connection failed", exc_info=True)
                 return None
         return self.db
-    
+
     def _get_cache_key(self, query_text: str) -> str:
-        """Generate cache key"""
         return hashlib.md5(query_text.strip().lower().encode()).hexdigest()[:16]
-    
+
     def _manage_cache(self):
-        """Keep cache size limited"""
-        if len(self.query_cache) >= self.max_cache_size:
-            keys_to_remove = list(self.query_cache.keys())[:self.max_cache_size//2]
-            for key in keys_to_remove:
-                del self.query_cache[key]
-    
-    def _check_database_exists_and_populated(self) -> bool:
-        """Quick database check"""
-        try:
-            db = self._get_db()
-            if db is None:
-                return False
-            
-            existing_items = db.get(limit=1, include=[])
-            return len(existing_items["ids"]) > 0 if existing_items["ids"] else False
-            
-        except Exception:
-            return False
+        while len(self.query_cache) > self.DEFAULT_MAX_CACHE_SIZE:
+            self.query_cache.popitem(last=False)  # Remove oldest
 
     def _clean_response(self, response: str) -> str:
-        """Clean AI response"""
         import re
         cleaned = re.sub(r'^\d+\.\s*', '', response.strip())
         cleaned = re.sub(r'^\d+\)\s*', '', cleaned)
         return cleaned.strip()
 
     def _invoke_gemini_fast(self, prompt: str) -> str:
-        """Fast Gemini API call"""
         try:
             response = self.model.generate_content(prompt)
             return self._clean_response(response.text.strip())
-        except Exception as e:
-            
+        except Exception:
+            logging.error("Gemini API call failed", exc_info=True)
             raise
-    
+
     def load_pdf_documents(self, pdf_directory: str) -> List[Document]:
-        """Load PDF documents with memory limits"""
         try:
             loader = PyPDFDirectoryLoader(pdf_directory)
             documents = loader.load()
-            
-            if len(documents) > 10:
-                documents = documents[:10]
-            
-            return documents
-        except Exception as e:
-         
+            return documents[:self.DEFAULT_MAX_DOCS_PDF]
+        except Exception:
+            logging.error("Failed to load PDF documents", exc_info=True)
             raise
-    
+
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        """Split documents with memory limits"""
         try:
             chunks = self.text_splitter.split_documents(documents)
-            
-            if len(chunks) > 200:
-                chunks = chunks[:200]
-            
-            return chunks
-        except Exception as e:
-           
+            return chunks[:self.DEFAULT_MAX_CHUNKS_SPLIT]
+        except Exception:
+            logging.error("Document splitting failed", exc_info=True)
             raise
-    
+
     def create_vector_store_from_text(self, text: str, source_name: str = "text_input") -> Chroma:
-        """Create vector store from text with memory limits"""
         try:
-            chunks = self.text_splitter.split_text(text)
-            
+            chunks = self.text_splitter.split_text(text)[:self.DEFAULT_MAX_CHUNKS_TEXT]
             if not chunks:
                 raise ValueError("No text chunks created")
-            
-            if len(chunks) > 30:
-                chunks = chunks[:30]
-            
-            documents = []
-            for i, chunk in enumerate(chunks):
-                doc = Document(
+
+            documents = [
+                Document(
                     page_content=chunk,
                     metadata={
                         "id": f"{source_name}:0:{i}",
                         "source": source_name,
                         "chunk_id": i
                     }
-                )
-                documents.append(doc)
-            
+                ) for i, chunk in enumerate(chunks)
+            ]
             return self._add_to_chroma(documents)
-            
-        except Exception as e:
-           
+        except Exception:
+            logging.error("Failed to create vector store from text", exc_info=True)
             raise
-    
+
     def _add_to_chroma(self, chunks: List[Document]) -> Chroma:
-        """Add documents to Chroma database"""
         try:
-            db = Chroma(
-                embedding_function=self.embedding_function
-            )
-            
+            db = self._get_db()
+            if db is None:
+                db = Chroma(
+                    embedding_function=self.embedding_function,
+                    persist_directory=self.chroma_path
+                )
+
             existing_items = db.get(include=[], limit=1000)
-            existing_ids = set(existing_items["ids"]) if existing_items["ids"] else set()
-            
-            new_chunks = []
-            for chunk in chunks:
-                chunk_id = chunk.metadata.get("id")
-                if chunk_id and chunk_id not in existing_ids:
-                    new_chunks.append(chunk)
-            
-            if new_chunks:
-                batch_size = 10
-                for i in range(0, len(new_chunks), batch_size):
-                    batch = new_chunks[i:i+batch_size]
-                    db.add_documents(batch)
-                    time.sleep(0.1)
-                
-                self.db = db
-            
+            existing_ids = set(existing_items["ids"] or [])
+
+            new_chunks = [c for c in chunks if c.metadata.get("id") not in existing_ids]
+
+            for i in range(0, len(new_chunks), self.DEFAULT_BATCH_SIZE):
+                db.add_documents(new_chunks[i:i + self.DEFAULT_BATCH_SIZE])
+                time.sleep(0.05)
+
+            self.db = db
             return db
-            
-        except Exception as e:
-           
+        except Exception:
+            logging.error("Failed to add documents to Chroma", exc_info=True)
             raise
-    
+
     def add_pdf_documents(self, pdf_directory: str) -> Chroma:
-        """Add PDF documents to database"""
         try:
             documents = self.load_pdf_documents(pdf_directory)
             chunks = self.split_documents(documents)
             return self._add_to_chroma(chunks)
-        except Exception as e:
-           
+        except Exception:
+            logging.error("Failed to add PDF documents", exc_info=True)
             raise
-    
+
     def query_rag(self, query_text: str, include_metrics: bool = False) -> Dict[str, Any]:
-        """Main RAG query function"""
         start_time = time.time()
-        
         try:
-            # Check cache
             cache_key = self._get_cache_key(query_text)
             if cache_key in self.query_cache:
-                cached_result = self.query_cache[cache_key].copy()
+                result = self.query_cache[cache_key].copy()
                 if include_metrics:
-                    cached_result["cache_hit"] = True
-                    cached_result["processing_time"] = time.time() - start_time
-                return cached_result
-            
-            # Manage cache size
+                    result.update({
+                        "cache_hit": True,
+                        "processing_time": time.time() - start_time
+                    })
+                return result
+
             self._manage_cache()
-            
-            # Get database
             db = self._get_db()
             if db is None:
-                return {
-                    "question": query_text,
-                    "answer": "Database connection failed",
-                    "query_type": "error",
-                    "processing_time": time.time() - start_time if include_metrics else None
-                }
-            
-            # Retrieve documents
-            results = db.similarity_search(query_text, k=10)
-            
+                return {"question": query_text, "answer": "Database connection failed", "query_type": "error"}
+
+            results = db.similarity_search(query_text, k=15)  # Increased from 10 for better coverage
             if not results:
-                return {
-                    "question": query_text,
-                    "answer": "No relevant information found in the database.",
-                    "query_type": "factual",
-                    "processing_time": time.time() - start_time if include_metrics else None
-                }
-            
-            # Create context
-            context_text = "\n---\n".join([doc.page_content for doc in results])
-            
-            if len(context_text) > 2000:
-                context_text = context_text[:2000] + "..."
-     
-            # Generate answer
-            prompt = f"""Context: {context_text}
+                return {"question": query_text, "answer": "No relevant information found.", "query_type": "factual"}
+
+            context_text = "\n---\n".join([doc.page_content for doc in results])[:4000] + "..."
+
+            prompt = f"""Based on the following context from a health insurance policy document, provide a concise and accurate answer to the question. If the information is not available in the context, clearly state that.
+
+Context:
+{context_text}
 
 Question: {query_text}
 
-Answer briefly:"""
-            
-            response_text = self._invoke_gemini_fast(prompt)
-            
-            # Prepare response
+Instructions:
+- Provide a brief, direct answer with key details only
+- Include specific numbers, limits, or conditions if mentioned
+- If information is not found, say "Not specified in the policy document"
+- Keep the answer under 100 words unless more detail is essential
+- Focus on the most relevant information only
+
+Answer:"""
+            answer = self._invoke_gemini_fast(prompt)
+
             response_data = {
                 "question": query_text,
-                "answer": response_text,
+                "answer": answer,
                 "query_type": "factual"
             }
-            
             if include_metrics:
                 response_data.update({
                     "processing_time": time.time() - start_time,
@@ -275,126 +222,88 @@ Answer briefly:"""
                     "context_length": len(context_text),
                     "cache_hit": False
                 })
-            
-            # Cache result
-            if cache_key:
-                self.query_cache[cache_key] = response_data.copy()
-            
+
+            self.query_cache[cache_key] = response_data.copy()
             return response_data
-            
         except Exception as e:
-          
-            return {
-                "question": query_text,
-                "answer": f"Error: {str(e)}",
-                "query_type": "error",
-                "processing_time": time.time() - start_time if include_metrics else None
-            }
-    
-    def answer_question(self, question: str) -> str:
-        """Simple question answering interface"""
-        result = self.query_rag(question)
-        return result["answer"]
-    
-    def process_questions(self, questions: List[str], include_metrics: bool = False) -> List[Dict[str, Any]]:
-        """Process multiple questions"""
-        if not questions:
-            return []
-        
-        results = []
-        for question in questions:
-            if not question or not question.strip():
-                results.append({
-                    "question": question,
-                    "answer": "Empty question",
-                    "query_type": "error"
-                })
-                continue
-            
-            result = self.query_rag(question.strip(), include_metrics)
-            results.append(result)
-        
-        return results
-    
+            logging.error("Query failed", exc_info=True)
+            return {"question": query_text, "answer": f"Error: {e}", "query_type": "error"}
+
     def get_database_stats(self) -> Dict[str, Any]:
-        """Get database statistics"""
         try:
             db = self._get_db()
             if db is None:
                 return {"database_exists": False}
-            
             existing_items = db.get(include=[], limit=1000)
-            
             return {
-                "total_documents": len(existing_items["ids"]) if existing_items["ids"] else 0,
+                "total_documents": len(existing_items["ids"] or []),
                 "database_exists": True,
                 "cache_size": len(self.query_cache)
             }
-            
         except Exception:
+            logging.error("Failed to get DB stats", exc_info=True)
             return {"database_exists": False}
-    
+
     def clear_database(self):
-        """Clear database"""
-        try:
-            self.db = None
-        except Exception as e:
-            raise ValueError(f"Failed to clear database: {str(e)}")
-    
+        self.db = None
+
     def clear_cache(self):
-        """Clear query cache"""
         self.query_cache.clear()
+
+    def process_questions(self, questions: List[str], include_metrics: bool = False) -> List[Dict[str, Any]]:
+        """Process multiple questions and return results"""
+        results = []
+        for question in questions:
+            try:
+                result = self.query_rag(question, include_metrics)
+                results.append(result)
+            except Exception as e:
+                logging.error(f"Failed to process question: {question}", exc_info=True)
+                results.append({
+                    "question": question,
+                    "answer": f"Error processing question: {str(e)}",
+                    "query_type": "error"
+                })
+        return results
+
 
 # Global instance
 lightweight_rag_pipeline = None
 
 def initialize_lightweight_rag_pipeline(api_key: str, chroma_path: str = "chroma_db"):
-    """Initialize the global lightweight RAG pipeline"""
     global lightweight_rag_pipeline
     lightweight_rag_pipeline = LightweightRAGPipeline(api_key, chroma_path)
 
 def process_questions_with_lightweight_rag(questions: List[str], include_metrics: bool = False) -> List[Dict[str, Any]]:
-    """Process questions using the lightweight pipeline"""
     if lightweight_rag_pipeline is None:
-        raise ValueError("Pipeline not initialized. Call initialize_lightweight_rag_pipeline() first.")
-    
+        raise ValueError("Pipeline not initialized.")
     return lightweight_rag_pipeline.process_questions(questions, include_metrics)
 
-# Example usage
+
 if __name__ == "__main__":
-    import sys
-    
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", help="question / --load-pdfs / --stats")
+    args = parser.parse_args()
+
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         print("Please set GOOGLE_API_KEY environment variable")
-        sys.exit(1)
-    
-    pipeline = LightweightRAGPipeline(api_key=api_key, chroma_path="chroma_db")
-    
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--load-pdfs":
-            if os.path.exists("pdfs"):
-                pipeline.add_pdf_documents("pdfs")
-            else:
-                sample_text = """
-                Artificial Intelligence (AI) is technology that enables machines to perform tasks that typically require human intelligence.
-                Machine learning is a subset of AI where algorithms learn from data to make predictions or decisions.
-                Natural language processing helps computers understand and work with human language.
-                Deep learning uses neural networks to solve complex problems like image recognition and language translation.
-                """
-                pipeline.create_vector_store_from_text(sample_text, "ai_basics")
-        
-        elif sys.argv[1] == "--stats":
-            stats = pipeline.get_database_stats()
-            print(json.dumps(stats, indent=2))
-        
+        exit(1)
+
+    pipeline = LightweightRAGPipeline(api_key=api_key)
+
+    if args.command == "--load-pdfs":
+        if os.path.exists("pdfs"):
+            pipeline.add_pdf_documents("pdfs")
         else:
-            query = sys.argv[1]
-            result = pipeline.query_rag(query)
-            print(result['answer'])
-    
+            sample_text = """
+            Artificial Intelligence (AI) enables machines to perform tasks that require human intelligence.
+            Machine learning is a subset of AI for predictions or decisions.
+            """
+            pipeline.create_vector_store_from_text(sample_text, "ai_basics")
+    elif args.command == "--stats":
+        print(json.dumps(pipeline.get_database_stats(), indent=2))
     else:
-        print("Lightweight RAG Pipeline Usage:")
-        print("  python script.py 'question'    - Ask a question")
-        print("  python script.py --load-pdfs   - Load PDF documents")
-        print("  python script.py --stats       - Show statistics")
+        result = pipeline.query_rag(args.command)
+        print(result['answer'])

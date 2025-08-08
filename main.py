@@ -49,15 +49,24 @@ def process_pdf_with_rag(pdf_content: bytes, questions: list) -> list:
         text = ""
         for page_num, page in enumerate(reader.pages):
             page_text = page.extract_text()
-            text += page_text
+            # Clean up the text
+            page_text = page_text.replace('\x00', '')  # Remove null characters
+            page_text = ' '.join(page_text.split())  # Normalize whitespace
+            text += page_text + "\n\n"  # Add spacing between pages
             logger.info(f"Extracted text from page {page_num + 1}, length: {len(page_text)}")
         
         logger.info(f"Total text extracted: {len(text)} characters")
 
         if not text.strip():
             raise ValueError("Downloaded PDF is empty or unreadable")
+        
+        # Log a sample of the extracted text for debugging
+        logger.info(f"Sample text (first 500 chars): {text[:500]}")
 
-        # Create vector store from the extracted text
+        # Clear existing database and create vector store from the extracted text
+        logger.info("Clearing existing database...")
+        rag_pipeline.clear_database()
+        
         logger.info("Creating vector store from PDF content...")
         rag_pipeline.create_vector_store_from_text(text, "current_pdf_document")
         
