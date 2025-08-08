@@ -54,8 +54,8 @@ class LightweightRAGPipeline:
         )
        
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=20,
+            chunk_size=600,
+            chunk_overlap=50,
             length_function=len,
         )
         
@@ -236,7 +236,7 @@ class LightweightRAGPipeline:
                 }
             
             # Retrieve documents
-            results = db.similarity_search(query_text, k=2)
+            results = db.similarity_search(query_text, k=5)
             
             if not results:
                 return {
