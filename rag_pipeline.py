@@ -236,7 +236,7 @@ class LightweightRAGPipeline:
                 }
             
             # Retrieve documents
-            results = db.similarity_search(query_text, k=5)
+            results = db.similarity_search(query_text, k=10)
             
             if not results:
                 return {
