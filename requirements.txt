@@ -6,7 +6,7 @@ requests==2.31.0
 # PDF processing
 pypdf==5.9.0
 
-# LangChain ecosystem
+# LangChain ecosystem - using compatible versions
 langchain==0.3.27
 langchain-community==0.3.27
 langchain-core==0.3.72
@@ -17,10 +17,10 @@ langchain-chroma>=0.1.0
 google-generativeai>=0.3.1,<0.4.0
 langchain-google-genai>=0.0.6
 
-# Vector store
-chromadb>=1.0.9
+# Vector store - using compatible version
+chromadb>=0.4.0,<0.7.0
 
-# ML libraries
+# ML libraries - using compatible versions
 sentence-transformers==2.7.0
 transformers>=4.44.0,<4.45.0
 torch>=2.6.0
