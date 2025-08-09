@@ -11,6 +11,8 @@ import hashlib
 import logging
 from typing import List, Optional, Dict, Any
 from collections import OrderedDict
+import threading
+import threading
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
@@ -34,7 +36,7 @@ class LightweightRAGPipeline:
     DEFAULT_RETRY_BASE_DELAY = 0.5
     DEFAULT_MAX_CHUNKS_SPLIT = 300    # Increased from 200
 
-    def __init__(self, api_key: str = None, chroma_path: str = "chroma_db"):
+    def __init__(self, api_key: str = None, chroma_path: Optional[str] = None):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("Google API key is required. Set GOOGLE_API_KEY environment variable.")
@@ -51,8 +53,11 @@ class LightweightRAGPipeline:
             }
         )
 
-        self.chroma_path = chroma_path
+        # Default to a writable path on most PaaS (e.g., Render)
+        self.chroma_path = chroma_path or os.getenv("CHROMA_PATH", "/tmp/chroma_db")
+        os.makedirs(self.chroma_path, exist_ok=True)
         self.query_cache = OrderedDict()  # LRU-style cache
+        self.db_lock = threading.Lock()
         class GoogleRetrievalEmbeddings:
             def __init__(self, api_key: str):
                 self._doc = GoogleGenerativeAIEmbeddings(
@@ -179,13 +184,16 @@ class LightweightRAGPipeline:
 
             new_chunks = [c for c in chunks if c.metadata.get("id") not in existing_ids]
 
-            for i in range(0, len(new_chunks), self.DEFAULT_BATCH_SIZE):
-                db.add_documents(new_chunks[i:i + self.DEFAULT_BATCH_SIZE])
-                time.sleep(0.05)
+            # Serialize writes to avoid DB contention / readonly errors
+            with self.db_lock:
+                for i in range(0, len(new_chunks), self.DEFAULT_BATCH_SIZE):
+                    db.add_documents(new_chunks[i:i + self.DEFAULT_BATCH_SIZE])
+                    time.sleep(0.05)
 
             # Ensure writes are persisted before any queries
             try:
-                db.persist()
+                with self.db_lock:
+                    db.persist()
             except Exception:
                 logging.warning("Chroma persist() failed or is unnecessary for this backend")
 
@@ -195,7 +203,8 @@ class LightweightRAGPipeline:
             # Warm-up embeddings service and vector store to avoid cold-start hiccups
             try:
                 _ = self.embedding_function.embed_query("warmup")
-                _ = db.similarity_search("warmup", k=1)
+                with self.db_lock:
+                    _ = db.similarity_search("warmup", k=1)
             except Exception:
                 logging.info("Warm-up of embeddings/vector store skipped")
 
@@ -236,7 +245,8 @@ class LightweightRAGPipeline:
             last_err = None
             for attempt in range(self.DEFAULT_MAX_RETRIES):
                 try:
-                    results = db.similarity_search(query_text, k=15)
+                    with self.db_lock:
+                        results = db.similarity_search(query_text, k=15)
                     break
                 except Exception as e:
                     last_err = e
@@ -252,7 +262,8 @@ class LightweightRAGPipeline:
             if not results:
                 time.sleep(0.3)
                 try:
-                    results = db.similarity_search(query_text, k=25)
+                    with self.db_lock:
+                        results = db.similarity_search(query_text, k=25)
                 except Exception:
                     pass
             if not results:

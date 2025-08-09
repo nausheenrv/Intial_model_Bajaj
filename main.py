@@ -27,12 +27,16 @@ rag_pipeline = None
 def initialize_rag_pipeline():
     """Initialize the RAG pipeline with API key"""
     global rag_pipeline
-    api_key = os.getenv('GOOGLE_API_KEY', 'AIzaSyCzK5gdfDGmPcQENRHdC6AhDfMh3gkwAWY')
+    api_key = os.getenv('GOOGLE_API_KEY')
+    if not api_key:
+        logger.error("GOOGLE_API_KEY is not set. Please configure the environment variable.")
+        return False
     
     try:
+        chroma_path = os.getenv('CHROMA_PATH', '/tmp/chroma_db')
         rag_pipeline = LightweightRAGPipeline(
             api_key=api_key,
-            chroma_path="chroma_db"
+            chroma_path=chroma_path
         )
         logger.info("RAG pipeline initialized successfully")
         return True
