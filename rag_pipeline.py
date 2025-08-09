@@ -324,6 +324,12 @@ class LightweightRAGPipeline:
                     break
                 except Exception as e:
                     last_err = e
+                    # If backend reports readonly DB, switch to ephemeral and retry
+                    msg = str(e).lower()
+                    if "readonly" in msg or "read-only" in msg or "code: 1032" in msg:
+                        logging.warning("Readonly DB detected during query; resetting to Ephemeral client and retrying")
+                        self._reset_chroma_client(force_ephemeral=True)
+                        db = self._get_db()
                     logging.warning(
                         f"similarity_search failed (attempt {attempt + 1}/{self.DEFAULT_MAX_RETRIES})",
                         exc_info=True,
