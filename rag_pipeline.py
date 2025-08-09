@@ -7,6 +7,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 import time
 import shutil
 import json
+import uuid
 import hashlib
 import logging
 from typing import List, Optional, Dict, Any
@@ -55,9 +56,16 @@ class LightweightRAGPipeline:
 
         # Default to a writable path on most PaaS (e.g., Render)
         self.chroma_path = chroma_path or os.getenv("CHROMA_PATH", "/tmp/chroma_db")
-        os.makedirs(self.chroma_path, exist_ok=True)
+        try:
+            os.makedirs(self.chroma_path, exist_ok=True)
+        except Exception:
+            pass
         self.query_cache = OrderedDict()  # LRU-style cache
         self.db_lock = threading.Lock()
+        # Control whether to persist to disk; default false to avoid readonly FS issues
+        self.persist_enabled = os.getenv("CHROMA_PERSIST", "false").lower() == "true"
+        # Use a unique collection per load to avoid collisions
+        self.collection_name = f"lc_{uuid.uuid4().hex[:8]}"
         class GoogleRetrievalEmbeddings:
             def __init__(self, api_key: str):
                 self._doc = GoogleGenerativeAIEmbeddings(
@@ -91,10 +99,17 @@ class LightweightRAGPipeline:
     def _get_db(self):
         if self.db is None:
             try:
-                self.db = Chroma(
-                    embedding_function=self.embedding_function,
-                    persist_directory=self.chroma_path
-                )
+                if self.persist_enabled:
+                    self.db = Chroma(
+                        collection_name=self.collection_name,
+                        embedding_function=self.embedding_function,
+                        persist_directory=self.chroma_path
+                    )
+                else:
+                    self.db = Chroma(
+                        collection_name=self.collection_name,
+                        embedding_function=self.embedding_function
+                    )
             except Exception as e:
                 logging.error("Database connection failed", exc_info=True)
                 return None
@@ -174,10 +189,17 @@ class LightweightRAGPipeline:
         try:
             db = self._get_db()
             if db is None:
-                db = Chroma(
-                    embedding_function=self.embedding_function,
-                    persist_directory=self.chroma_path
-                )
+                if self.persist_enabled:
+                    db = Chroma(
+                        collection_name=self.collection_name,
+                        embedding_function=self.embedding_function,
+                        persist_directory=self.chroma_path
+                    )
+                else:
+                    db = Chroma(
+                        collection_name=self.collection_name,
+                        embedding_function=self.embedding_function
+                    )
 
             existing_items = db.get(include=[], limit=1000)
             existing_ids = set(existing_items["ids"] or [])
@@ -191,11 +213,12 @@ class LightweightRAGPipeline:
                     time.sleep(0.05)
 
             # Ensure writes are persisted before any queries
-            try:
-                with self.db_lock:
-                    db.persist()
-            except Exception:
-                logging.warning("Chroma persist() failed or is unnecessary for this backend")
+            if self.persist_enabled:
+                try:
+                    with self.db_lock:
+                        db.persist()
+                except Exception:
+                    logging.warning("Chroma persist() failed or is unnecessary for this backend")
 
             # Small guard delay to ensure index is ready before first query
             time.sleep(0.2)
@@ -331,14 +354,9 @@ Answer:"""
 
     def clear_database(self):
         """Reset vector store and cache to avoid cross-request contamination."""
-        try:
-            # Drop in-memory handle first
-            self.db = None
-            # Remove on-disk persisted DB so a fresh collection is created next time
-            if os.path.exists(self.chroma_path):
-                shutil.rmtree(self.chroma_path, ignore_errors=True)
-        except Exception:
-            logging.error("Failed to clear DB directory", exc_info=True)
+        # Drop in-memory handle and rotate collection name for a fresh start
+        self.db = None
+        self.collection_name = f"lc_{uuid.uuid4().hex[:8]}"
         # Also clear the query cache so we don't return stale answers
         self.clear_cache()
 
