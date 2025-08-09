@@ -21,6 +21,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 import google.generativeai as genai
 from google.generativeai import GenerativeModel
+import chromadb
+from chromadb.config import Settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -66,6 +68,50 @@ class LightweightRAGPipeline:
         self.persist_enabled = os.getenv("CHROMA_PERSIST", "false").lower() == "true"
         # Use a unique collection per load to avoid collisions
         self.collection_name = f"lc_{uuid.uuid4().hex[:8]}"
+        logging.info(
+            f"Chroma config: mode={'persistent' if self.persist_enabled else 'ephemeral'}, "
+            f"path={self.chroma_path}, collection={self.collection_name}"
+        )
+
+        # Initialize a Chroma client explicitly to control persistence and storage location
+        try:
+            if self.persist_enabled:
+                self._chroma_client = chromadb.PersistentClient(
+                    path=self.chroma_path,
+                    settings=Settings(allow_reset=True)
+                )
+            else:
+                # Pure in-memory ephemeral client
+                self._chroma_client = chromadb.EphemeralClient(
+                    settings=Settings(allow_reset=True)
+                )
+        except Exception:
+            logging.error("Failed to initialize Chroma client", exc_info=True)
+            self._chroma_client = None
+        else:
+            logging.info(
+                "Chroma client initialized: "
+                + ("PersistentClient" if self.persist_enabled else "EphemeralClient")
+            )
+
+    def _reset_chroma_client(self, force_ephemeral: bool = False):
+        """Recreate the Chroma client and DB handle, optionally forcing ephemeral mode."""
+        try:
+            if force_ephemeral or not self.persist_enabled:
+                self._chroma_client = chromadb.EphemeralClient(settings=Settings(allow_reset=True))
+            else:
+                self._chroma_client = chromadb.PersistentClient(
+                    path=self.chroma_path,
+                    settings=Settings(allow_reset=True)
+                )
+            self.db = Chroma(
+                collection_name=self.collection_name,
+                embedding_function=self.embedding_function,
+                client=self._chroma_client
+            )
+            logging.info("Chroma client reset: " + ("Ephemeral" if force_ephemeral or not self.persist_enabled else "Persistent"))
+        except Exception:
+            logging.error("Failed to reset Chroma client", exc_info=True)
         class GoogleRetrievalEmbeddings:
             def __init__(self, api_key: str):
                 self._doc = GoogleGenerativeAIEmbeddings(
@@ -99,17 +145,14 @@ class LightweightRAGPipeline:
     def _get_db(self):
         if self.db is None:
             try:
-                if self.persist_enabled:
-                    self.db = Chroma(
-                        collection_name=self.collection_name,
-                        embedding_function=self.embedding_function,
-                        persist_directory=self.chroma_path
-                    )
-                else:
-                    self.db = Chroma(
-                        collection_name=self.collection_name,
-                        embedding_function=self.embedding_function
-                    )
+                if self._chroma_client is None:
+                    # Ensure we always have a writable, in-memory client as fallback
+                    self._reset_chroma_client(force_ephemeral=True)
+                self.db = Chroma(
+                    collection_name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    client=self._chroma_client
+                )
             except Exception as e:
                 logging.error("Database connection failed", exc_info=True)
                 return None
@@ -189,28 +232,36 @@ class LightweightRAGPipeline:
         try:
             db = self._get_db()
             if db is None:
-                if self.persist_enabled:
-                    db = Chroma(
-                        collection_name=self.collection_name,
-                        embedding_function=self.embedding_function,
-                        persist_directory=self.chroma_path
-                    )
-                else:
-                    db = Chroma(
-                        collection_name=self.collection_name,
-                        embedding_function=self.embedding_function
-                    )
+                db = Chroma(
+                    collection_name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    client=self._chroma_client
+                )
 
-            existing_items = db.get(include=[], limit=1000)
+            with self.db_lock:
+                existing_items = db.get(include=[], limit=1000)
             existing_ids = set(existing_items["ids"] or [])
 
             new_chunks = [c for c in chunks if c.metadata.get("id") not in existing_ids]
 
-            # Serialize writes to avoid DB contention / readonly errors
-            with self.db_lock:
-                for i in range(0, len(new_chunks), self.DEFAULT_BATCH_SIZE):
-                    db.add_documents(new_chunks[i:i + self.DEFAULT_BATCH_SIZE])
-                    time.sleep(0.05)
+            def write_chunks(active_db: Chroma, chunks_to_write: List[Document]):
+                with self.db_lock:
+                    for i in range(0, len(chunks_to_write), self.DEFAULT_BATCH_SIZE):
+                        active_db.add_documents(chunks_to_write[i:i + self.DEFAULT_BATCH_SIZE])
+                        time.sleep(0.05)
+
+            try:
+                write_chunks(db, new_chunks)
+            except Exception as e:
+                msg = str(e).lower()
+                if "readonly" in msg or "read-only" in msg or "code: 1032" in msg:
+                    logging.warning("Readonly DB detected; switching to Ephemeral client and retrying add_documents")
+                    self.collection_name = f"lc_{uuid.uuid4().hex[:8]}"
+                    self._reset_chroma_client(force_ephemeral=True)
+                    db = self._get_db()
+                    write_chunks(db, new_chunks)
+                else:
+                    raise
 
             # Ensure writes are persisted before any queries
             if self.persist_enabled:
@@ -357,6 +408,8 @@ Answer:"""
         # Drop in-memory handle and rotate collection name for a fresh start
         self.db = None
         self.collection_name = f"lc_{uuid.uuid4().hex[:8]}"
+        # Force a fresh in-memory client to avoid any filesystem persistence issues
+        self._reset_chroma_client(force_ephemeral=True)
         # Also clear the query cache so we don't return stale answers
         self.clear_cache()
 
