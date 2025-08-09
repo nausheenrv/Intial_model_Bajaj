@@ -29,7 +29,9 @@ class LightweightRAGPipeline:
     DEFAULT_BATCH_SIZE = 10
     DEFAULT_MAX_OUTPUT_TOKENS = 1024  # Increased from 512 for more detailed answers
     DEFAULT_MAX_DOCS_PDF = 10
-    DEFAULT_MAX_CHUNKS_TEXT = 50      # Increased from 30
+    DEFAULT_MAX_CHUNKS_TEXT = 500      # Allow many more chunks from text inputs
+    DEFAULT_MAX_RETRIES = 3
+    DEFAULT_RETRY_BASE_DELAY = 0.5
     DEFAULT_MAX_CHUNKS_SPLIT = 300    # Increased from 200
 
     def __init__(self, api_key: str = None, chroma_path: str = "chroma_db"):
@@ -51,11 +53,26 @@ class LightweightRAGPipeline:
 
         self.chroma_path = chroma_path
         self.query_cache = OrderedDict()  # LRU-style cache
-        self.embedding_function = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=self.api_key,
-            task_type="retrieval_document"
-        )
+        class GoogleRetrievalEmbeddings:
+            def __init__(self, api_key: str):
+                self._doc = GoogleGenerativeAIEmbeddings(
+                    model="models/text-embedding-004",
+                    google_api_key=api_key,
+                    task_type="retrieval_document",
+                )
+                self._query = GoogleGenerativeAIEmbeddings(
+                    model="models/text-embedding-004",
+                    google_api_key=api_key,
+                    task_type="retrieval_query",
+                )
+
+            def embed_documents(self, texts):
+                return self._doc.embed_documents(texts)
+
+            def embed_query(self, text):
+                return self._query.embed_query(text)
+
+        self.embedding_function = GoogleRetrievalEmbeddings(self.api_key)
 
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.DEFAULT_CHUNK_SIZE,
@@ -92,12 +109,20 @@ class LightweightRAGPipeline:
         return cleaned.strip()
 
     def _invoke_gemini_fast(self, prompt: str) -> str:
-        try:
-            response = self.model.generate_content(prompt)
-            return self._clean_response(response.text.strip())
-        except Exception:
-            logging.error("Gemini API call failed", exc_info=True)
-            raise
+        last_err = None
+        for attempt in range(self.DEFAULT_MAX_RETRIES):
+            try:
+                response = self.model.generate_content(prompt)
+                return self._clean_response(response.text.strip())
+            except Exception as e:
+                last_err = e
+                logging.warning(
+                    f"Gemini API call failed (attempt {attempt + 1}/{self.DEFAULT_MAX_RETRIES})",
+                    exc_info=True,
+                )
+                time.sleep(self.DEFAULT_RETRY_BASE_DELAY * (2 ** attempt))
+        logging.error("Gemini API call failed after retries", exc_info=True)
+        raise last_err
 
     def load_pdf_documents(self, pdf_directory: str) -> List[Document]:
         try:
@@ -118,7 +143,10 @@ class LightweightRAGPipeline:
 
     def create_vector_store_from_text(self, text: str, source_name: str = "text_input") -> Chroma:
         try:
-            chunks = self.text_splitter.split_text(text)[:self.DEFAULT_MAX_CHUNKS_TEXT]
+            chunks = self.text_splitter.split_text(text)
+            if len(chunks) > self.DEFAULT_MAX_CHUNKS_TEXT:
+                logging.info(f"Truncating chunks from {len(chunks)} to {self.DEFAULT_MAX_CHUNKS_TEXT}")
+                chunks = chunks[:self.DEFAULT_MAX_CHUNKS_TEXT]
             if not chunks:
                 raise ValueError("No text chunks created")
 
@@ -155,6 +183,22 @@ class LightweightRAGPipeline:
                 db.add_documents(new_chunks[i:i + self.DEFAULT_BATCH_SIZE])
                 time.sleep(0.05)
 
+            # Ensure writes are persisted before any queries
+            try:
+                db.persist()
+            except Exception:
+                logging.warning("Chroma persist() failed or is unnecessary for this backend")
+
+            # Small guard delay to ensure index is ready before first query
+            time.sleep(0.2)
+
+            # Warm-up embeddings service and vector store to avoid cold-start hiccups
+            try:
+                _ = self.embedding_function.embed_query("warmup")
+                _ = db.similarity_search("warmup", k=1)
+            except Exception:
+                logging.info("Warm-up of embeddings/vector store skipped")
+
             self.db = db
             return db
         except Exception:
@@ -188,18 +232,38 @@ class LightweightRAGPipeline:
             if db is None:
                 return {"question": query_text, "answer": "Database connection failed", "query_type": "error"}
 
-            # Ensure deterministic retrieval ordering where possible
-            results = db.similarity_search(query_text, k=15)
-            # Attempt to stabilize order: sort by chunk_id then id if present
-            try:
-                results.sort(key=lambda d: (
-                    d.metadata.get("chunk_id", 0),
-                    str(d.metadata.get("id", ""))
-                ))
-            except Exception:
-                pass
+            # Keep similarity order to preserve relevance ranking; use more docs for first-answer recall
+            last_err = None
+            for attempt in range(self.DEFAULT_MAX_RETRIES):
+                try:
+                    results = db.similarity_search(query_text, k=15)
+                    break
+                except Exception as e:
+                    last_err = e
+                    logging.warning(
+                        f"similarity_search failed (attempt {attempt + 1}/{self.DEFAULT_MAX_RETRIES})",
+                        exc_info=True,
+                    )
+                    time.sleep(self.DEFAULT_RETRY_BASE_DELAY * (2 ** attempt))
+            else:
+                raise last_err
+
+            # If no results (possible immediately after a cold start), retry once after a short wait
+            if not results:
+                time.sleep(0.3)
+                try:
+                    results = db.similarity_search(query_text, k=25)
+                except Exception:
+                    pass
             if not results:
                 return {"question": query_text, "answer": "No relevant information found.", "query_type": "factual"}
+
+            # Log retrieved IDs for debug
+            try:
+                retrieved_ids = [str(doc.metadata.get("id", "")) for doc in results]
+                logging.info(f"Retrieved {len(results)} docs; sample IDs: {retrieved_ids[:5]}")
+            except Exception:
+                pass
 
             context_text = "\n---\n".join([doc.page_content for doc in results])[:4000] + "..."
 
@@ -277,6 +341,8 @@ Answer:"""
             try:
                 result = self.query_rag(question, include_metrics)
                 results.append(result)
+                # Small delay to avoid API rate limiting affecting later answers
+                time.sleep(0.1)
             except Exception as e:
                 logging.error(f"Failed to process question: {question}", exc_info=True)
                 results.append({
