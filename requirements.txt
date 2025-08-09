@@ -6,21 +6,21 @@ requests==2.31.0
 # PDF processing
 pypdf==5.9.0
 
-# LangChain ecosystem - using compatible versions
+# LangChain ecosystem – using compatible versions
 langchain==0.3.27
 langchain-community==0.3.27
 langchain-core==0.3.72
 langchain-text-splitters==0.3.9
 langchain-chroma>=0.2.0
 
-# Google AI - using compatible versions
+# Google AI – using compatible versions
 google-generativeai>=0.3.1,<0.4.0
 langchain-google-genai>=0.0.6
 
-# Vector store - using compatible version
-chromadb>=1.0.9
+# Vector store – align to <0.7.0 so langchain-chroma can install it
+chromadb>=0.4.0,<0.7.0
 
-# ML libraries - using compatible versions
+# ML libraries – using compatible versions
 sentence-transformers==2.7.0
 transformers>=4.44.0,<4.45.0
 torch>=2.6.0
@@ -35,9 +35,3 @@ typing-extensions>=4.12.0
 tqdm>=4.66.0
 pydantic>=2.9.0,<3.0.0
 psutil>=6.1.0
-
-
-
-
-
-
