@@ -14,9 +14,9 @@ langchain-text-splitters==0.3.9
 # Constrain to a version range that matches chromadb>=1.0.9
 langchain-chroma>=0.2.4,<0.3.0
 
-# Google AI – using compatible versions
-google-generativeai>=0.3.1,<0.4.0
-langchain-google-genai>=0.0.6
+# Google AI – using compatible versions with langchain-core 0.3.x
+google-generativeai>=0.9.0,<0.10.0
+langchain-google-genai>=2.1.0,<2.2.0
 
 # Vector store – align with langchain-chroma requirement
 chromadb>=1.0.9,<2.0.0
