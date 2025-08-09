@@ -27,8 +27,11 @@ rag_pipeline = None
 def initialize_rag_pipeline():
     """Initialize the RAG pipeline with API key"""
     global rag_pipeline
-    api_key = os.getenv('GOOGLE_API_KEY', 'AIzaSyCzK5gdfDGmPcQENRHdC6AhDfMh3gkwAWY')
-    
+    api_key = os.getenv('GOOGLE_API_KEY')
+    if not api_key:
+        logger.error("GOOGLE_API_KEY is not set. Please configure the environment variable.")
+        return False
+
     try:
         rag_pipeline = LightweightRAGPipeline(
             api_key=api_key,

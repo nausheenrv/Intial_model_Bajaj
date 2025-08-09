@@ -5,6 +5,7 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['OMP_NUM_THREADS'] = '1'
 
 import time
+import shutil
 import json
 import hashlib
 import logging
@@ -41,8 +42,8 @@ class LightweightRAGPipeline:
         self.model = GenerativeModel(
             "gemini-1.5-flash",
             generation_config={
-                "temperature": 0.1,
-                "top_p": 0.8,
+                "temperature": 0.0,
+                "top_p": 1.0,
                 "top_k": 10,
                 "max_output_tokens": self.DEFAULT_MAX_OUTPUT_TOKENS,
             }
@@ -187,7 +188,16 @@ class LightweightRAGPipeline:
             if db is None:
                 return {"question": query_text, "answer": "Database connection failed", "query_type": "error"}
 
-            results = db.similarity_search(query_text, k=15)  # Increased from 10 for better coverage
+            # Ensure deterministic retrieval ordering where possible
+            results = db.similarity_search(query_text, k=15)
+            # Attempt to stabilize order: sort by chunk_id then id if present
+            try:
+                results.sort(key=lambda d: (
+                    d.metadata.get("chunk_id", 0),
+                    str(d.metadata.get("id", ""))
+                ))
+            except Exception:
+                pass
             if not results:
                 return {"question": query_text, "answer": "No relevant information found.", "query_type": "factual"}
 
@@ -245,7 +255,17 @@ Answer:"""
             return {"database_exists": False}
 
     def clear_database(self):
-        self.db = None
+        """Reset vector store and cache to avoid cross-request contamination."""
+        try:
+            # Drop in-memory handle first
+            self.db = None
+            # Remove on-disk persisted DB so a fresh collection is created next time
+            if os.path.exists(self.chroma_path):
+                shutil.rmtree(self.chroma_path, ignore_errors=True)
+        except Exception:
+            logging.error("Failed to clear DB directory", exc_info=True)
+        # Also clear the query cache so we don't return stale answers
+        self.clear_cache()
 
     def clear_cache(self):
         self.query_cache.clear()
